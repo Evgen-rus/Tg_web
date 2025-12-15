@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+
+# Playwright / Telegram session (НЕ коммитим)
+tg_profile/
+
+# Playwright artifacts (если включишь записи/скриншоты)
+playwright-report/
+test-results/
+*.zip
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
