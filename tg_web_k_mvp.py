@@ -79,15 +79,22 @@ def get_message_locator(page):
 
 
 def detect_direction_prefix(msg_loc) -> str:
+    """
+    Определяем вход/выход по расположению сообщения:
+    справа (центр пузыря правее середины окна) -> [you]
+    слева -> [in ]
+    """
     try:
-        cls = (msg_loc.get_attribute("class") or "").lower()
-        if "out" in cls or "is-out" in cls or "message-out" in cls:
-            return "[you] "
-        if "in" in cls or "is-in" in cls or "message-in" in cls:
-            return "[in ] "
+        side = msg_loc.evaluate(
+            """(el) => {
+                const r = el.getBoundingClientRect();
+                const centerX = r.left + r.width / 2;
+                return centerX > (window.innerWidth / 2) ? 'out' : 'in';
+            }"""
+        )
+        return "[you] " if side == "out" else "[in ] "
     except Exception:
-        pass
-    return ""
+        return "[msg] "
 
 
 def get_message_key(msg_loc) -> str:
@@ -256,9 +263,7 @@ def main():
                         remember(key, txt)
                         print(f"{prefix}{txt}")
                         continue
-
-                    # Если очень нужно видеть edits — оставь этот блок.
-                    # Если edits не важны — можно удалить целиком.
+                    
                     if txt != seen_text.get(key, ""):
                         remember(key, txt)
                         print(f"{prefix}[edit] {txt}")
