@@ -1,6 +1,6 @@
 # Telegram Web (k) -> Bot MVP (Python + Playwright)
 
-MVP: пишу текст в терминале -> скрипт отправляет его боту в Telegram Web -> ждёт ответ -> печатает ответ в терминал.
+MVP: пишу текст в терминале -> скрипт отправляет его в чат в Telegram Web -> ждёт ответ -> печатает ответ в терминал.
 
 ## Требования
 - Python 3.10+
@@ -28,7 +28,7 @@ python tg_web_k_mvp.py
 1. Откроется окно браузера.
 2. Если нужно — залогинься в Telegram Web (QR/код).
 3. Должен открыться чат по ссылке на бота:
-   [https://web.telegram.org/k/#@Neyroosint_test_bot](https://web.telegram.org/k/#@Neyroosint_test_bot)
+   [https://web.telegram.org/k/#@EvgeniiRa](https://web.telegram.org/k/#@EvgeniiRa)
 4. Вернись в терминал и нажми Enter.
 5. Пиши сообщения в терминале, ответы будут выводиться строкой ниже.
 
@@ -43,7 +43,7 @@ Telegram Web меняет верстку, иногда надо обновить
 Самый быстрый способ снять правильные локаторы:
 
 ```bash
-python -m playwright codegen "https://web.telegram.org/k/#@Neyroosint_test_bot"
+python -m playwright codegen "https://web.telegram.org/k/#@EvgeniiRa"
 ```
 
 Кликни по полю ввода — справа появится locator. Его можно вставить в список `INPUT_SELECTORS` в скрипте.

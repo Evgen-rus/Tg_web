@@ -2,7 +2,7 @@ import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
 
-BOT_URL = "https://web.telegram.org/k/#@Neyroosint_test_bot"
+CHAT_URL = "https://web.telegram.org/k/#@EvgeniiRa"
 PROFILE_DIR = Path("./tg_profile")  # сохранит сессию (логин останется)
 
 INPUT_SELECTORS = [
@@ -41,14 +41,14 @@ def main():
         context = p.chromium.launch_persistent_context(
             user_data_dir=str(PROFILE_DIR),
             headless=False,
-        )  # persistent context = хранит логин/куки/сторедж :contentReference[oaicite:2]{index=2}
+        )  # persistent context = хранит логин/куки/сторедж 
         page = context.new_page()
-        page.goto(BOT_URL, wait_until="domcontentloaded")
+        page.goto(CHAT_URL, wait_until="domcontentloaded")
 
         print("\nОткрыл Telegram Web.")
         print("Если ты не залогинен — залогинься (QR/код).")
-        print("Если чат с ботом не открылся сам — открой его вручную.")
-        input("\nКогда чат с ботом открыт — нажми Enter... ")
+        print("Если чат по ссылке CHAT_URL не открылся сам — открой его вручную.")
+        input("\nКогда чат по ссылке CHAT_URL открыт — нажми Enter... ")
 
         input_box = find_first(page, INPUT_SELECTORS)
         if not input_box:
