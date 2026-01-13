@@ -3,6 +3,7 @@ import re
 import threading
 import queue
 import hashlib
+from collections import deque
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
@@ -15,6 +16,10 @@ PROFILE_DIR = Path("./tg_profile")
 POLL_INTERVAL = 0.5     # частота опроса
 TAIL_K = 10             # сколько последних сообщений читать
 MAX_CACHE = 5000        # ограничение кэша seen
+
+# Если сообщение из чата совпало с тем, что ты отправил из терминала
+# в течение этого окна — НЕ печатаем его (чтобы не было дубля).
+ECHO_SUPPRESS_WINDOW = 10.0  # секунд
 
 INPUT_SELECTORS = [
     "footer div[contenteditable='true']",
@@ -62,9 +67,7 @@ def clean_text(text: str) -> str:
 
     # trim
     lines = [line.strip() for line in text.split("\n")]
-    text = "\n".join(lines).strip()
-
-    return text
+    return "\n".join(lines).strip()
 
 
 def get_message_locator(page):
@@ -78,30 +81,10 @@ def get_message_locator(page):
     return None
 
 
-def detect_direction_prefix(msg_loc) -> str:
-    """
-    Определяем вход/выход по расположению сообщения:
-    справа (центр пузыря правее середины окна) -> [you]
-    слева -> [in ]
-    """
-    try:
-        side = msg_loc.evaluate(
-            """(el) => {
-                const r = el.getBoundingClientRect();
-                const centerX = r.left + r.width / 2;
-                return centerX > (window.innerWidth / 2) ? 'out' : 'in';
-            }"""
-        )
-        return "[you] " if side == "out" else "[in ] "
-    except Exception:
-        return "[msg] "
-
-
 def get_message_key(msg_loc) -> str:
     """
     1) Пытаемся достать стабильный message id из DOM (сам элемент/родители/дети).
     2) Если не нашли — хешируем outerHTML.
-    Это устраняет повторную печать из-за “смещения индекса” в хвосте.
     """
     try:
         dom_id = msg_loc.evaluate(
@@ -149,6 +132,25 @@ def get_message_key(msg_loc) -> str:
     return f"html:{h}"
 
 
+def detect_direction_prefix_by_position(msg_loc) -> str:
+    """
+    Определяем вход/выход по расположению сообщения:
+    справа -> [you], слева -> [in ].
+    Если не удалось — [msg].
+    """
+    try:
+        side = msg_loc.evaluate(
+            """(el) => {
+                const r = el.getBoundingClientRect();
+                const centerX = r.left + r.width / 2;
+                return centerX > (window.innerWidth / 2) ? 'out' : 'in';
+            }"""
+        )
+        return "[you] " if side == "out" else "[in ] "
+    except Exception:
+        return "[msg] "
+
+
 def stdin_reader(out_queue: "queue.Queue[str]"):
     while True:
         try:
@@ -172,12 +174,33 @@ def get_tail_messages(page, k: int):
         return []
 
 
+def prune_pending(pending: deque, now_ts: float, window: float):
+    while pending and (now_ts - pending[0][1]) > window:
+        pending.popleft()
+
+
+def match_and_consume_pending(pending: deque, txt: str) -> bool:
+    """
+    Если txt совпал с одним из недавно отправленных из терминала сообщений,
+    удаляем первое совпадение и возвращаем True.
+    """
+    for i, (p_txt, _ts) in enumerate(pending):
+        if p_txt == txt:
+            # удалить элемент по индексу
+            del pending[i]
+            return True
+    return False
+
+
 # =========================
 # MAIN
 # =========================
 def main():
     send_queue: "queue.Queue[str]" = queue.Queue()
     threading.Thread(target=stdin_reader, args=(send_queue,), daemon=True).start()
+
+    # Очередь "недавно отправленных" из терминала сообщений
+    pending_sends: deque[tuple[str, float]] = deque()
 
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
@@ -201,7 +224,7 @@ def main():
 
         # seen cache: key -> last_text
         seen_text: dict[str, str] = {}
-        seen_order: list[str] = []
+        seen_order: deque[str] = deque()
 
         def remember(key: str, txt: str):
             if key in seen_text:
@@ -209,9 +232,8 @@ def main():
                 return
             seen_text[key] = txt
             seen_order.append(key)
-            # ограничение памяти
             while len(seen_order) > MAX_CACHE:
-                old = seen_order.pop(0)
+                old = seen_order.popleft()
                 seen_text.pop(old, None)
 
         # При старте: ничего старого не печатаем, просто помечаем хвост как seen
@@ -226,11 +248,15 @@ def main():
 
         print("\nРежим моста включён:")
         print("- в консоль выводятся только новые сообщения после запуска")
+        print("- сообщения из чата, совпадающие с отправленными из терминала (10 сек), не печатаются (без дубля)")
         print("- то, что ты вводишь в консоль, отправляется в чат")
         print("Для выхода: Ctrl+C\n")
 
         while True:
             try:
+                now_ts = time.time()
+                prune_pending(pending_sends, now_ts, ECHO_SUPPRESS_WINDOW)
+
                 # 1) отправка из консоли в чат
                 while not send_queue.empty():
                     text = send_queue.get().strip()
@@ -242,6 +268,10 @@ def main():
                     input_box.click()
                     input_box.fill(text)
                     input_box.press("Enter")
+
+                    # запоминаем отправку, чтобы подавить дубль из DOM
+                    pending_sends.append((text, time.time()))
+                    prune_pending(pending_sends, time.time(), ECHO_SUPPRESS_WINDOW)
 
                 # 2) читаем только хвост (последние TAIL_K сообщений)
                 tail = get_tail_messages(page, TAIL_K)
@@ -257,13 +287,21 @@ def main():
                     if not txt:
                         continue
 
-                    prefix = detect_direction_prefix(m)
+                    # подавление "эхо" (сообщение в DOM совпало с тем, что отправили из терминала недавно)
+                    prune_pending(pending_sends, time.time(), ECHO_SUPPRESS_WINDOW)
+                    if match_and_consume_pending(pending_sends, txt):
+                        # отмечаем как seen, но НЕ печатаем
+                        remember(key, txt)
+                        continue
+
+                    prefix = detect_direction_prefix_by_position(m)
 
                     if key not in seen_text:
                         remember(key, txt)
                         print(f"{prefix}{txt}")
                         continue
-                    
+
+                    # edits (если нужно видеть) — оставляем
                     if txt != seen_text.get(key, ""):
                         remember(key, txt)
                         print(f"{prefix}[edit] {txt}")
